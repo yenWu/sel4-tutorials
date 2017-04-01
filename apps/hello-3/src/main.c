@@ -171,7 +171,8 @@ int main(void)
     simple_print(&simple);
 
     /* create an allocator */
-    allocman = bootstrap_use_current_simple(&simple, ALLOCATOR_STATIC_POOL_SIZE,        allocator_mem_pool);
+    allocman = bootstrap_use_current_simple(&simple, ALLOCATOR_STATIC_POOL_SIZE, allocator_mem_pool);
+
     ZF_LOGF_IF(allocman == NULL, "Failed to initialize alloc manager.\n"
         "\tMemory pool sufficiently sized?\n"
         "\tMemory pool pointer valid?\n");
@@ -207,6 +208,10 @@ int main(void)
      * Link to source: https://wiki.sel4.systems/seL4%20Tutorial%203#TODO_1:
      */
     vka_object_t ipc_frame_object;
+    error = vka_alloc_frame(vka, IPC_BUFFER_SIZE_BITS, ipc_frame_object);
+
+    ZF_LOGF_IFERR(error, "Failed to allocate ipc frame object\n"
+        "\tVKA given sufficient bootstrap memory?");
 
     /*
      * map the frame into the vspace at ipc_buffer_vaddr.
@@ -245,6 +250,9 @@ int main(void)
      *	before trying again.
      */
 
+    error = seL4_X86_Page_Map(ipc_frame_buffer.cptr, pd, vaddr, seL4_AllRights, seL4_ARCH_VMAttributes);
+
+    ZF_LOGF_IFERR(error, "Failed to map page.\n");
 
     if (error != 0) {
         /* TODO 3: create a page table */
@@ -255,6 +263,9 @@ int main(void)
 		 * @return 0 on success
 		 * Link to source: https://wiki.sel4.systems/seL4%20Tutorial%203#TODO_3:
          */
+        vka_object_t page_table_object;
+		error = vka_alloc_page_table(vka, page_table_object);
+
         ZF_LOGF_IFERR(error, "Failed to allocate new page table.\n");
 
         /* TODO 4: map the page table */
@@ -278,6 +289,8 @@ int main(void)
 		 *
          * hint 2: for VM attributes use seL4_ARCH_Default_VMAttributes
          */
+		 error = seL4_X86_PageTable_Map(page_table_object.cptr, seL4_X86_PageDirectory pd, ipc_buffer_vaddr, seL4_ARCH_Default_VMAttributes);
+
         ZF_LOGF_IFERR(error, "Failed to map page table into VSpace.\n"
             "\tWe are inserting a new page table into the top-level table.\n"
             "\tPass a capability to the new page table, and not for example, the IPC buffer frame vaddr.\n")
@@ -287,6 +300,8 @@ int main(void)
          * hint 2: for the rights, use seL4_AllRights
          * hint 3: for VM attributes use seL4_ARCH_Default_VMAttributes
          */
+		 error = seL4_X86_PageTable_Map(ipc_frame_object.cptr, seL4_X86_PageDirectory pd, ipc_buffer_vaddr, seL4_ARCH_Default_VMAttributes);
+
         ZF_LOGF_IFERR(error, "Failed again to map the IPC buffer frame into the VSpace.\n"
 			"\t(It's not supposed to fail.)\n"
             "\tPass a capability to the IPC buffer's physical frame.\n"
@@ -305,6 +320,8 @@ int main(void)
      * @return 0 on success
      * Link to source: https://wiki.sel4.systems/seL4%20Tutorial%203#TODO_6:
      */
+    error = vka_alloc_endpoint(vka, ep_object);
+
     ZF_LOGF_IFERR(error, "Failed to allocate new endpoint object.\n");
 
     /* TODO 7: make a badged copy of it in our cspace. This copy will be used to send
@@ -335,6 +352,11 @@ int main(void)
      *
      * hint 4: for the badge use EP_BADGE
      */
+    seL4_CapData_t badge = seL4_CapData_Badge_new(EP_BADGE);
+    cspacepath_t cspacepath;
+
+    error = vka_mint_object(vka, ep_object, cspacepath, seL4_AllRights, seL4_CapData_t badge);
+
     ZF_LOGF_IFERR(error, "Failed to mint new badged copy of IPC endpoint.\n"
         "\tseL4_Mint is the backend for vka_mint_object.\n"
         "\tseL4_Mint is simply being used here to create a badged copy of the same IPC endpoint.\n"
@@ -343,7 +365,7 @@ int main(void)
     /* initialise the new TCB */
     error = seL4_TCB_Configure(tcb_object.cptr, seL4_CapNull, seL4_MaxPrio,
         cspace_cap, seL4_NilData, pd_cap, seL4_NilData,
-        ipc_buffer_vaddr, ipc_frame_object.cptr);
+        ipc_buffer_vaddr, ipc_frame_object.cptr);/*TODO: This is different from hello-2*/
     ZF_LOGF_IFERR(error, "Failed to configure the new TCB object.\n"
         "\tWe're running the new thread with the root thread's CSpace.\n"
         "\tWe're running the new thread in the root thread's VSpace.\n");
@@ -353,7 +375,7 @@ int main(void)
 
     /* set start up registers for the new thread */
     seL4_UserContext regs = {0};
-    size_t regs_size = sizeof(seL4_UserContext) / sizeof(seL4_Word);
+    size_t regs_size = sizeof(seL4_UserContext) / sizeof(z; seL4_Word);
 
     /* set instruction pointer where the thread shoud start running */
     sel4utils_set_instruction_pointer(&regs, (seL4_Word)thread_2);

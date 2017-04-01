@@ -20,4 +20,12 @@
 
 /* TODO 1: add a main function to print a message */
 /* hint: printf */
+int main(int argc, char* argv[])
+{
+    *(char*) 0x0 = 'X';
+    printf("Hello seL4 microkernel\n");
+    printf("Hello seL4 microkernel\n");
+    printf("Hello seL4 microkernel\n");
 
+    return 0;
+}

@@ -37,6 +37,16 @@ static uint64_t thread_2_stack[THREAD_2_STACK_SIZE];
 /* convenience function */
 extern void name_thread(seL4_CPtr tcb, char *name);
 
+
+seL4_CPtr get_untyped(seL4_BootInfo *info, int size_bytes)
+{
+    for(int i = info->untyped.start, idx = 0; i < info->untyped.end; ++i, ++idx) {
+        if (1 << info->untypedSizeBitsList[idx] >= size_bytes)
+            return i
+
+    return -1;/*fail*/
+}
+
 /* function to run in the new thread */
 void thread_2(void) {
     printf("thread_2: hallo wereld\n");
@@ -70,6 +80,7 @@ int main(void)
     /* TODO 1: Set tcb_cap to a free cap slot index.
      * hint: The bootinfo struct contains a range of free cap slot indices.
      */
+    tcb_cap = info->empty.start;
 
     seL4_CPtr untyped;
     /* TODO 2: Obtain a cap to an untyped which is large enough to contain a tcb.
@@ -79,6 +90,8 @@ int main(void)
      * hint 2: an array of untyped caps, and a corresponding array of untyped sizes
      *         can be found in the bootinfo struct
      */
+    untyped = get_untyped(info, (1 << seL4_TCBBits));
+
 
     /* TODO 3: Retype the untyped into a tcb, storing a cap in tcb_cap
      *
@@ -87,6 +100,15 @@ int main(void)
      * hint 3: use cspace_cap for the root cnode AND the cnode_index
      *         (bonus question: What property of the calling thread's cspace must hold for this to be ok?)
      */
+    /*FIXME: Why*/
+    error = seL4_Untyped_Retype(untyped,
+                                seL4_TCBObject,
+                                seL4_TCBBits,
+                                cspace_cap,
+                                cspace_cap,
+                                32,
+                                tcb_cap,
+                                1);
 
     ZF_LOGF_IFERR(error, "Failed to allocate a TCB object.\n"
         "\tDid you find an untyped capability to retype?\n"
@@ -119,12 +141,17 @@ int main(void)
         } seL4_UserContext;
 
      */
+    regs.eip  = (seL4_Word) thread_2;
+    regs.esp  = (seL4_Word) thread_2_stack_top;
 
     /* TODO 5: Write the registers in regs to the new thread
      *
      * hint 1: int seL4_TCB_WriteRegisters(seL4_TCB service, seL4_Bool resume_target, seL4_Uint8 arch_flags, seL4_Word count, seL4_UserContext *regs);
      * hint 2: the value of arch_flags is ignored on x86 and arm
      */
+
+    error = seL4_TCB_WriteRegisters(tcb_cap, 0, 0, 2, &regs);
+
     ZF_LOGF_IFERR(error, "Failed to write the new thread's register set.\n"
         "\tDid you write the correct number of registers? See arg4.\n");
 

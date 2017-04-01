@@ -60,9 +60,11 @@ void thread_2(void) {
     /* make sure it is what we expected */
     ZF_LOGF_IF(sender_badge != EP_BADGE,
         "Badge on the endpoint was not what was expected.\n");
+
     ZF_LOGF_IF(seL4_MessageInfo_get_length(tag) != 1,
         "Length of the data send from root thread was not what was expected.\n"
         "\tHow many registers did you set with seL4_SetMR, within the root thread?\n");
+
 
     /* get the message stored in the first message register */
     msg = seL4_GetMR(0);
@@ -134,11 +136,11 @@ int main(void)
      */
 
     /* decide on slots to use based on what is free */
-    seL4_CPtr tcb_cap = ???;
-    seL4_CPtr ipc_frame_cap = ???;
-    ep_cap = ???;
-    badged_ep_cap = ???;
-    seL4_CPtr page_table_cap = ???;
+    seL4_CPtr tcb_cap = info->empty.start;
+    seL4_CPtr ipc_frame_cap = info->empty.start + 1;
+    ep_cap = info->empty.start + 2;
+    badged_ep_cap = info->empty.start + 3;
+    seL4_CPtr page_table_cap = info->empty.start + 4;
 
     /* get an untyped to retype into all the objects we will need */
     seL4_CPtr untyped;
@@ -158,6 +160,10 @@ int main(void)
      *         of the object is "chipped off". For simplicity, find a cap to an untyped which is large enough
      *         to contain all required objects.
      */
+    untyped = get_untyped(info, (1<<seL4_TCBBits) +
+                                (1<<seL4_PageBits) +
+                                (1<<seL4_EndpointBits) +
+                                (1<<seL4_PageTableBits));
     ZF_LOGF_IF(untyped == -1, "Failed to find an untyped which could hold %d bytes.\n",
         (1<<seL4_TCBBits) +
         (1<<seL4_PageBits) +
@@ -170,10 +176,12 @@ int main(void)
      * hint 2: use a depth of 32
      * hint 3: use cspace_cap for the root cnode AND the cnode_index
      */
+   /* create required objects */
+    error = untyped_retype_root(untyped, seL4_TCBObject, seL4_TCBBits, cspace_cap, tcb_cap);
     ZF_LOGF_IFERR(error, "Failed to retype our chosen untyped into a TCB child object.\n");
- 
+    error = untyped_retype_root(untyped, seL4_X86_4K, seL4_PageBits, cspace_cap, ipc_frame_cap);
     ZF_LOGF_IFERR(error, "Failed to retype our chosen untyped into a page object.\n");
-
+    error = untyped_retype_root(untyped, seL4_EndpointObject, seL4_EndpointBits, cspace_cap, ep_cap);
     ZF_LOGF_IFERR(error, "Failed to retype our chosen untyped into an Endpoint child object.\n");
 
     /*
@@ -182,8 +190,11 @@ int main(void)
      * If there is already a page table mapped in the appropriate slot in the
      * page directory where we can insert this frame, then this will succeed.
      * Otherwise we first need to create a page table, and map it in to
-     * the page`directory, before we can map the frame in.
-     */
+     * the page directory, before we can map the frame in.
+     *
+	 * It is normal for this function call to fail. Proceed to the next step
+	 * where you'll be led to allocate a new empty page table.
+	 */
     seL4_Word ipc_buffer_vaddr;
     ipc_buffer_vaddr = IPCBUF_VADDR;
     error = seL4_X86_Page_Map(ipc_frame_cap, pd_cap, ipc_buffer_vaddr,
@@ -191,9 +202,12 @@ int main(void)
     if (error != 0) {
 
         /* TODO 4: Retype the untyped into page table (if this was done in TODO 3, ignore this). */
+
+        /* create and map a page table */
+        error = untyped_retype_root(untyped, seL4_X86_PageTableObject, seL4_PageTableBits, cspace_cap, page_table_cap);
         ZF_LOGF_IFERR(error, "Failed to retype an object into a page table.\n"
             "Re-examine your arguments -- check the solution files if you're unable to get it.\n");
-
+        
         error = seL4_X86_PageTable_Map(page_table_cap, pd_cap,
             ipc_buffer_vaddr, seL4_X86_Default_VMAttributes);
         ZF_LOGF_IFERR(error, "Failed to map page table into VSpace.\n"
@@ -215,6 +229,11 @@ int main(void)
     /* TODO 5: Mint a copy of the endpoint cap into our cspace, using the badge EP_BADGE
      * hint: int seL4_CNode_Mint(seL4_CNode service, seL4_Word dest_index, seL4_Uint8 dest_depth, seL4_CNode src_root, seL4_Word src_index, seL4_Uint8 src_depth, seL4_CapRights rights, seL4_CapData_t badge);
      */
+
+    /* create a copy of the endpoint cap with a badge (to use for sending) */
+    seL4_CNode_Mint(cspace_cap, badged_ep_cap, 32, cspace_cap, ep_cap, 32,
+        seL4_AllRights, seL4_CapData_Badge_new(EP_BADGE));
+
 
     /* initialise the new TCB */
     error = seL4_TCB_Configure(tcb_cap, seL4_CapNull, seL4_MaxPrio,
@@ -275,6 +294,7 @@ int main(void)
     ZF_LOGF_IF(seL4_MessageInfo_get_length(tag) != 1,
         "Response data from thread_2 was not the length expected.\n"
         "\tHow many registers did you set with seL4_SetMR within thread_2?\n");
+
     msg = seL4_GetMR(0);
     ZF_LOGF_IF(msg != ~MSG_DATA,
         "Response data from thread_2's content was not what was expected.\n");
